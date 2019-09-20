@@ -29,11 +29,6 @@ namespace graph
 
             class EdgeIterator;
 
-            static VertexType vertexFromPair(const std::pair<VertexType, VertexInfo>& pair)
-            {
-                return pair.first;
-            }
-
             std::unordered_map<VertexType, VertexInfo> m_adjMap;
             std::size_t m_order = 0;
 
@@ -65,9 +60,10 @@ namespace graph
 
             auto vertices() const
             {
+                auto transform = [](const std::pair<VertexType, VertexInfo>& pair){return pair.first;};
                 return std::make_pair(
-                    boost::make_transform_iterator(m_adjMap.cbegin(), vertexFromPair),
-                    boost::make_transform_iterator(m_adjMap.cend(), vertexFromPair));
+                    boost::make_transform_iterator(m_adjMap.cbegin(), transform),
+                    boost::make_transform_iterator(m_adjMap.cend(), transform));
             }
 
             auto edges() const
@@ -96,9 +92,22 @@ namespace graph
             auto outNeighbors(const VertexType& vertex) const
             {
                 auto neighbors(boost::make_shared<std::unordered_set<VertexType>>());
-                for (const auto& edge: m_adjMap.at(vertex).second.outEdges)
+                for (const auto& edge: m_adjMap.at(vertex).outEdges)
                     neighbors->insert(edge.head());
                 return boost::make_shared_container_range(neighbors);
+            }
+
+            /*
+            auto incidentInEdges(const VertexType& vertex)
+            {
+                // TODO
+            }
+            */
+
+            auto incidentOutEdges(const VertexType& vertex) const
+            {
+                const std::vector<EdgeType>& edges = m_adjMap.at(vertex).outEdges;
+                return std::make_pair(edges.cbegin(), edges.cend());
             }
 
             void addVertex(const VertexType& vertex) {addVertexIfNotPresent(vertex);}
