@@ -6,7 +6,11 @@
 #include <vector>
 #include <iterator>
 #include <utility>
+#include <unordered_set>
+#include <boost/make_shared.hpp>
+#include <boost/shared_container_iterator.hpp>
 #include <boost/iterator/iterator_facade.hpp>
+#include <boost/iterator/transform_iterator.hpp>
 
 #include "utils.hpp"
 #include "edge.hpp"
@@ -17,92 +21,108 @@ namespace graph
     class DirectedAdjacencyList final
     {
         private:
-            std::unordered_map<VertexType, std::vector<EdgeType>> m_adjMap;
+            struct VertexInfo
+            {
+                std::size_t indegree = 0;
+                std::vector<EdgeType> outEdges;
+            };
+
+            class EdgeIterator;
+
+            static VertexType vertexFromPair(const std::pair<VertexType, VertexInfo>& pair)
+            {
+                return pair.first;
+            }
+
+            std::unordered_map<VertexType, VertexInfo> m_adjMap;
             std::size_t m_order = 0;
 
-            std::vector<EdgeType>& getEdgeContainer(const VertexType& vertex)
+            VertexInfo& getVertexInfo(const VertexType& vertex)
             {
                 auto slot(m_adjMap.find(vertex));
                 if (slot != m_adjMap.end())
                     return slot->second;
                 else
-                    return m_adjMap.emplace(vertex, std::vector<EdgeType>()).first->second;
+                    return m_adjMap.emplace(vertex, VertexInfo{}).first->second;
             }
 
         public:
             using vertex_t = VertexType;
             using edge_t = EdgeType;
 
-            class ConstVertexIterator;
-            class ConstEdgeIterator;
-
             DirectedAdjacencyList() = default;
             explicit DirectedAdjacencyList(std::size_t initialCapacity): m_adjMap(initialCapacity) {}
             DirectedAdjacencyList(const DirectedAdjacencyList<VertexType, EdgeType>& other) = default;
 
-            DirectedAdjacencyList(DirectedAdjacencyList<VertexType, EdgeType>&& other)
-            {
-                if (&other != this)
-                {
-                    m_adjMap = std::move(other.m_adjMap);
-                    m_order = other.m_order;
-                }
-            }
+            DirectedAdjacencyList(DirectedAdjacencyList<VertexType, EdgeType>&& other) noexcept:
+                m_adjMap(std::move(other.m_adjMap)), m_order(other.m_order) {}
 
             std::size_t size() const {return m_adjMap.size();}
             std::size_t order() const {return m_order;}
 
-            std::size_t indegree(const VertexType& vertex) const
+            std::size_t indegree(const VertexType& vertex) const {return m_adjMap.at(vertex).indegree;}
+            std::size_t outdegree(const VertexType& vertex) const {return m_adjMap.at(vertex).outEdges.size();}
+
+            auto vertices() const
             {
-                std::size_t total = 0;
-                for (const auto& elem: m_adjMap)
-                {
-                    for (const auto& edge: elem.second)
-                    {
-                        if (edge.head() == vertex)
-                            ++total;
-                    }
-                }
-                return total;
+                return std::make_pair(
+                    boost::make_transform_iterator(m_adjMap.cbegin(), vertexFromPair),
+                    boost::make_transform_iterator(m_adjMap.cend(), vertexFromPair));
             }
 
-            std::size_t outdegree(const VertexType& vertex) const {return m_adjMap.at(vertex).size();}
-
-            ConstVertexIterator cbeginVertices() const {return ConstVertexIterator(m_adjMap.cbegin());}
-            ConstVertexIterator cendVertices() const {return ConstVertexIterator(m_adjMap.cend());}
-
-            ConstEdgeIterator cbeginEdges() const
+            auto edges() const
             {
                 auto begin(m_adjMap.cbegin());
-                if (begin != m_adjMap.cend())
-                    return ConstEdgeIterator(this, begin, begin->second.cbegin());
-                else
-                    return ConstEdgeIterator();
+                EdgeIterator rangeStart(begin != m_adjMap.cend()
+                    ? EdgeIterator(this, begin, begin->second.outEdges.cbegin())
+                    : EdgeIterator());
+                return std::make_pair(rangeStart, EdgeIterator());
             }
 
-            ConstEdgeIterator cendEdges() const {return ConstEdgeIterator();}
+            auto inNeighbors(const VertexType& vertex) const
+            {
+                auto neighbors(boost::make_shared<std::unordered_set<VertexType>>());
+                for (const auto& elem: m_adjMap)
+                {
+                    for (const auto& edge: elem.second.outEdges)
+                    {
+                        if (edge.head() == vertex)
+                            neighbors->insert(edge.tail());
+                    }
+                }
+                return boost::make_shared_container_range(neighbors);
+            }
+
+            auto outNeighbors(const VertexType& vertex) const
+            {
+                auto neighbors(boost::make_shared<std::unordered_set<VertexType>>());
+                for (const auto& edge: m_adjMap.at(vertex).second.outEdges)
+                    neighbors->insert(edge.head());
+                return boost::make_shared_container_range(neighbors);
+            }
 
             void addVertex(const VertexType& vertex) {addVertexIfNotPresent(vertex);}
-            bool addVertexIfNotPresent(const VertexType& vertex) {return !getEdgeContainer(vertex).size();}
+            bool addVertexIfNotPresent(const VertexType& vertex) {return !getVertexInfo(vertex).outEdges.size();}
 
             void addEdge(const EdgeType& edge)
             {
                 addVertexIfNotPresent(edge.head());
-                getEdgeContainer(edge.tail()).push_back(edge);
-                ++m_order;
+                VertexInfo& tailInfo = getVertexInfo(edge.tail());
+                tailInfo.outEdges.push_back(edge);
+                ++tailInfo.indegree, ++m_order;
             }
 
             bool addEdgeIfNotPresent(const EdgeType& edge)
             {
-                auto& incident = getEdgeContainer(edge.tail());
-                for (const auto& existingEdge: incident)
+                VertexInfo& tailInfo = getVertexInfo(edge.tail());
+                for (const auto& existingEdge: tailInfo.outEdges)
                 {
                     if (areParallel(edge, existingEdge))
                         return false;
                 }
                 addVertexIfNotPresent(edge.head());
-                incident.push_back(edge);
-                ++m_order;
+                tailInfo.outEdges.push_back(edge);
+                ++tailInfo.indegree, ++m_order;
                 return true;
             }
 
@@ -137,7 +157,8 @@ namespace graph
             DirectedAdjacencyList<VertexType, EdgeType>& operator=(
                 const DirectedAdjacencyList<VertexType, EdgeType>& other) = default;
 
-            DirectedAdjacencyList<VertexType, EdgeType>& operator=(DirectedAdjacencyList<VertexType, EdgeType>&& other)
+            DirectedAdjacencyList<VertexType, EdgeType>& operator=(
+                DirectedAdjacencyList<VertexType, EdgeType>&& other) noexcept
             {
                 if (&other != this)
                 {
@@ -149,33 +170,13 @@ namespace graph
     };
 
     template <typename VertexType, typename EdgeType>
-    class DirectedAdjacencyList<VertexType, EdgeType>::ConstVertexIterator final: public boost::iterator_facade<
-        DirectedAdjacencyList<VertexType, EdgeType>::ConstVertexIterator, const VertexType, std::forward_iterator_tag>
+    class DirectedAdjacencyList<VertexType, EdgeType>::EdgeIterator final: public boost::iterator_facade<
+        DirectedAdjacencyList<VertexType, EdgeType>::EdgeIterator, const EdgeType, std::forward_iterator_tag>
     {
         friend class boost::iterator_core_access;
 
         private:
-            using mapIter_t = typename std::unordered_map<VertexType, std::vector<EdgeType>>::const_iterator;
-
-            mapIter_t m_mapIter;
-
-            const VertexType& dereference() const {return m_mapIter->first;}
-            bool equal(const ConstVertexIterator& other) const {return m_mapIter == other.m_mapIter;}
-            void increment() {++m_mapIter;}
-
-        public:
-            ConstVertexIterator() = default;
-            explicit ConstVertexIterator(const mapIter_t& mapIter): m_mapIter(mapIter) {}
-    };
-
-    template <typename VertexType, typename EdgeType>
-    class DirectedAdjacencyList<VertexType, EdgeType>::ConstEdgeIterator final: public boost::iterator_facade<
-        DirectedAdjacencyList<VertexType, EdgeType>::ConstEdgeIterator, const EdgeType, std::forward_iterator_tag>
-    {
-        friend class boost::iterator_core_access;
-
-        private:
-            using mapIter_t = typename std::unordered_map<VertexType, std::vector<EdgeType>>::const_iterator;
+            using mapIter_t = typename std::unordered_map<VertexType, VertexInfo>::const_iterator;
             using vecIter_t = typename std::vector<EdgeType>::const_iterator;
 
             const DirectedAdjacencyList<VertexType, EdgeType>* m_outer = nullptr;
@@ -185,16 +186,17 @@ namespace graph
             bool isPastTheEnd() const
             {
                 return !m_outer || m_mapIter == m_outer->m_adjMap.cend() ||
-                       (std::next(m_mapIter) == m_outer->m_adjMap.cend() && m_vecIter == m_mapIter->second.cend());
+                       (std::next(m_mapIter) == m_outer->m_adjMap.cend() &&
+                        m_vecIter == m_mapIter->second.outEdges.cend());
             }
 
             void seekNextNotIsolated()
             {
                 for (; m_mapIter != m_outer->m_adjMap.cend(); ++m_mapIter)
                 {
-                    if (m_mapIter->second.size())
+                    if (m_mapIter->second.outEdges.size())
                     {
-                        m_vecIter = m_mapIter->second.cbegin();
+                        m_vecIter = m_mapIter->second.outEdges.cbegin();
                         break;
                     }
                 }
@@ -202,7 +204,7 @@ namespace graph
 
             const EdgeType& dereference() const {return *m_vecIter;}
 
-            bool equal(const ConstEdgeIterator& other) const
+            bool equal(const EdgeIterator& other) const
             {
                 bool otherPastTheEnd = other.isPastTheEnd();
                 if (isPastTheEnd())
@@ -215,7 +217,7 @@ namespace graph
 
             void increment()
             {
-                if (m_vecIter + 1 == m_mapIter->second.cend())
+                if (m_vecIter + 1 == m_mapIter->second.outEdges.cend())
                 {
                     ++m_mapIter;
                     seekNextNotIsolated();
@@ -225,8 +227,8 @@ namespace graph
             }
 
         public:
-            ConstEdgeIterator() = default;
-            ConstEdgeIterator(
+            EdgeIterator() = default;
+            EdgeIterator(
                 const DirectedAdjacencyList<VertexType, EdgeType>* outer,
                 const mapIter_t& mapIter,
                 const vecIter_t& vecIter):
