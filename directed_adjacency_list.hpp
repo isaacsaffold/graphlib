@@ -3,7 +3,7 @@
 
 #include <cstddef>
 #include <unordered_map>
-#include <vector>
+#include <forward_list>
 #include <iterator>
 #include <utility>
 #include <unordered_set>
@@ -23,8 +23,8 @@ namespace graph
         private:
             struct VertexInfo
             {
-                std::size_t indegree = 0;
-                std::vector<EdgeType> outEdges;
+                std::size_t indegree = 0, outdegree = 0;
+                std::forward_list<EdgeType> outEdges;
             };
 
             class EdgeIterator;
@@ -56,7 +56,7 @@ namespace graph
             std::size_t order() const {return m_order;}
 
             std::size_t indegree(const VertexType& vertex) const {return m_adjMap.at(vertex).indegree;}
-            std::size_t outdegree(const VertexType& vertex) const {return m_adjMap.at(vertex).outEdges.size();}
+            std::size_t outdegree(const VertexType& vertex) const {return m_adjMap.at(vertex).outdegree;}
 
             auto vertices() const
             {
@@ -106,19 +106,18 @@ namespace graph
 
             auto incidentOutEdges(const VertexType& vertex) const
             {
-                const std::vector<EdgeType>& edges = m_adjMap.at(vertex).outEdges;
+                const std::forward_list<EdgeType>& edges = m_adjMap.at(vertex).outEdges;
                 return std::make_pair(edges.cbegin(), edges.cend());
             }
 
             void addVertex(const VertexType& vertex) {addVertexIfNotPresent(vertex);}
-            bool addVertexIfNotPresent(const VertexType& vertex) {return !getVertexInfo(vertex).outEdges.size();}
+            bool addVertexIfNotPresent(const VertexType& vertex) {return getVertexInfo(vertex).outEdges.empty();}
 
             void addEdge(const EdgeType& edge)
             {
-                addVertexIfNotPresent(edge.head());
-                VertexInfo& tailInfo = getVertexInfo(edge.tail());
-                tailInfo.outEdges.push_back(edge);
-                ++tailInfo.indegree, ++m_order;
+                VertexInfo &tailInfo = getVertexInfo(edge.tail()), &headInfo = getVertexInfo(edge.head());
+                tailInfo.outEdges.push_front(edge);
+                ++tailInfo.indegree, ++headInfo.outdegree, ++m_order;
             }
 
             bool addEdgeIfNotPresent(const EdgeType& edge)
@@ -129,9 +128,9 @@ namespace graph
                     if (areParallel(edge, existingEdge))
                         return false;
                 }
-                addVertexIfNotPresent(edge.head());
-                tailInfo.outEdges.push_back(edge);
-                ++tailInfo.indegree, ++m_order;
+                VertexInfo& headInfo = getVertexInfo(edge.head());
+                tailInfo.outEdges.push_front(edge);
+                ++tailInfo.indegree, ++headInfo.outDegree, ++m_order;
                 return true;
             }
 
@@ -186,32 +185,32 @@ namespace graph
 
         private:
             using mapIter_t = typename std::unordered_map<VertexType, VertexInfo>::const_iterator;
-            using vecIter_t = typename std::vector<EdgeType>::const_iterator;
+            using listIter_t = typename std::forward_list<EdgeType>::const_iterator;
 
             const DirectedAdjacencyList<VertexType, EdgeType>* m_outer = nullptr;
             mapIter_t m_mapIter;
-            vecIter_t m_vecIter;
+            listIter_t m_listIter;
 
             bool isPastTheEnd() const
             {
                 return !m_outer || m_mapIter == m_outer->m_adjMap.cend() ||
                        (std::next(m_mapIter) == m_outer->m_adjMap.cend() &&
-                        m_vecIter == m_mapIter->second.outEdges.cend());
+                        m_listIter == m_mapIter->second.outEdges.cend());
             }
 
             void seekNextNotIsolated()
             {
                 for (; m_mapIter != m_outer->m_adjMap.cend(); ++m_mapIter)
                 {
-                    if (m_mapIter->second.outEdges.size())
+                    if (!m_mapIter->second.outEdges.empty())
                     {
-                        m_vecIter = m_mapIter->second.outEdges.cbegin();
+                        m_listIter = m_mapIter->second.outEdges.cbegin();
                         break;
                     }
                 }
             }
 
-            const EdgeType& dereference() const {return *m_vecIter;}
+            const EdgeType& dereference() const {return *m_listIter;}
 
             bool equal(const EdgeIterator& other) const
             {
@@ -221,18 +220,18 @@ namespace graph
                 else if (otherPastTheEnd)
                     return false;
                 else
-                    return m_mapIter == other.m_mapIter && m_vecIter == other.m_vecIter;
+                    return m_mapIter == other.m_mapIter && m_listIter == other.m_listIter;
             }
 
             void increment()
             {
-                if (m_vecIter + 1 == m_mapIter->second.outEdges.cend())
+                if (std::next(m_listIter) == m_mapIter->second.outEdges.cend())
                 {
                     ++m_mapIter;
                     seekNextNotIsolated();
                 }
                 else
-                    ++m_vecIter;
+                    ++m_listIter;
             }
 
         public:
@@ -240,8 +239,8 @@ namespace graph
             EdgeIterator(
                 const DirectedAdjacencyList<VertexType, EdgeType>* outer,
                 const mapIter_t& mapIter,
-                const vecIter_t& vecIter):
-                    m_outer(outer), m_mapIter(mapIter), m_vecIter(vecIter)
+                const listIter_t& listIter):
+                    m_outer(outer), m_mapIter(mapIter), m_listIter(listIter)
                 {
                     if (outer)
                         seekNextNotIsolated();
