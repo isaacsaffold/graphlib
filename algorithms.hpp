@@ -7,30 +7,63 @@
 #include <unordered_set>
 #include <utility>
 #include <cstddef>
+#include <memory>
+#include <type_traits>
 #include <boost/iterator/iterator_facade.hpp>
 
 namespace graph
 {
-    template <typename VertexType, typename EdgeType, template <typename, typename> typename DirectedGraph>
+    template <typename VertexType, typename DirectedGraph>
+    class DirectedBreadthFirstIterator;
+    template <typename VertexType, typename DirectedGraph>
+    class DirectedDepthFirstIterator;
+
+    #if __cplusplus < 201703
+    template <typename F, typename... ArgsTypes>
+    using return_t = std::result_of<F, ArgsTypes...>;
+    #else
+    template <typename F, typename... ArgsTypes>
+    using return_t = std::invoke_result<F, ArgsTypes...>;
+    #endif
+
+    template <typename VertexType, typename DirectedGraph>
+    auto directedBreadthFirst(const DirectedGraph& digraph, const VertexType& start)
+    {
+        return std::make_pair(
+            DirectedBreadthFirstIterator<VertexType, DirectedGraph>(&digraph, start),
+            DirectedBreadthFirstIterator<VertexType, DirectedGraph>());
+    }
+
+    template <typename VertexType, typename DirectedGraph>
     class DirectedBreadthFirstIterator final: public boost::iterator_facade<
-        DirectedBreadthFirstIterator<VertexType, EdgeType, DirectedGraph>, const VertexType, std::forward_iterator_tag>
+        DirectedBreadthFirstIterator<VertexType, DirectedGraph>, const VertexType, std::input_iterator_tag>
     {
         friend class boost::iterator_core_access;
+        friend auto directedBreadthFirst<VertexType, DirectedGraph>(const DirectedGraph&, const VertexType&);
 
         private:
-            const DirectedGraph<VertexType, EdgeType>* m_graph = nullptr;
-            std::queue<VertexType> m_vertexQueue;
-            std::unordered_set<VertexType> m_visited;
+            const DirectedGraph* m_graph = nullptr;
             VertexType m_start;
+            std::shared_ptr<std::queue<VertexType>> m_vertexQueue;
+            std::shared_ptr<std::unordered_set<VertexType>> m_visited;
             std::size_t m_poppedCount = 0;
 
-            const VertexType& dereference() const {return m_vertexQueue.front();}
-
-            bool equal(const DirectedBreadthFirstIterator<VertexType, EdgeType, DirectedGraph>& other) const
+            DirectedBreadthFirstIterator(const DirectedGraph* digraph, const VertexType& start):
+                m_graph(digraph), m_start(start), m_vertexQueue(new std::queue<VertexType>),
+                m_visited(new std::unordered_set<VertexType>)
             {
-                if (!m_vertexQueue.size())
-                    return !other.m_vertexQueue.size();
-                else if (!other.m_vertexQueue.size())
+                m_vertexQueue->push(start);
+                m_visited->insert(start);
+            }
+
+            const VertexType& dereference() const {return m_vertexQueue->front();}
+
+            bool equal(const DirectedBreadthFirstIterator<VertexType, DirectedGraph>& other) const
+            {
+                bool otherQueueIsEmpty = !other.m_vertexQueue || !other.m_vertexQueue->size();
+                if (!m_vertexQueue || !m_vertexQueue->size())
+                    return otherQueueIsEmpty;
+                else if (otherQueueIsEmpty)
                     return false;
                 // If they start with the same vertex and have traversed the same number of vertices, they are equal.
                 else
@@ -39,49 +72,89 @@ namespace graph
 
             void increment()
             {
-                auto iters(m_graph->outNeighbors(m_vertexQueue.front()));
+                auto iters(m_graph->outNeighbors(m_vertexQueue->front()));
                 for (; iters.first != iters.second; ++iters.first)
                 {
-                    if (!m_visited.count(*iters.first))
+                    if (!m_visited->count(*iters.first))
                     {
-                        m_vertexQueue.push(*iters.first);
-                        m_visited.insert(*iters.first);
+                        m_vertexQueue->push(*iters.first);
+                        m_visited->insert(*iters.first);
                     }
                 }
-                m_vertexQueue.pop();
+                m_vertexQueue->pop();
                 ++m_poppedCount;
             }
 
         public:
             DirectedBreadthFirstIterator() = default;
-            DirectedBreadthFirstIterator(const DirectedGraph<VertexType, EdgeType>* digraph, const VertexType& start):
-                m_graph(digraph), m_start(start)
-            {
-                m_vertexQueue.push(start);
-                m_visited.insert(start);
-            }
     };
 
-    template <typename VertexType, typename EdgeType, template <typename, typename> typename DirectedGraph>
+    template <typename VertexType, typename DirectedGraph>
+    auto directedDepthFirst(const DirectedGraph& digraph, const VertexType& start)
+    {
+        return std::make_pair(
+            DirectedDepthFirstIterator<VertexType, DirectedGraph>(&digraph, start),
+            DirectedDepthFirstIterator<VertexType, DirectedGraph>());
+    }
+
+    template <typename VertexType, typename DirectedGraph>
     class DirectedDepthFirstIterator final: public boost::iterator_facade<
-        DirectedDepthFirstIterator<VertexType, EdgeType, DirectedGraph>, const VertexType, std::forward_iterator_tag>
+        DirectedDepthFirstIterator<VertexType, DirectedGraph>, const VertexType, std::input_iterator_tag>
     {
         friend class boost::iterator_core_access;
+        friend auto directedDepthFirst<VertexType, DirectedGraph>(const DirectedGraph&, const VertexType&);
 
         private:
-            const DirectedGraph<VertexType, EdgeType>* m_graph = nullptr;
-            std::stack<VertexType> m_vertexStack;
-            std::unordered_set<VertexType> m_visited;
+            struct StackElem
+            {
+                VertexType vertex;
+                typename return_t<decltype(&DirectedGraph::outNeighbors)(DirectedGraph, const VertexType&)>::type
+                    outNeighborRange;
+            };
+
+            const DirectedGraph* m_graph = nullptr;
             VertexType m_start;
+            std::shared_ptr<std::stack<StackElem>> m_vertexStack;
+            std::shared_ptr<std::unordered_set<VertexType>> m_visited;
             std::size_t m_poppedCount = 0;
 
-            const VertexType& dereference() const {return m_vertexStack.top();}
-
-            bool equal(const DirectedDepthFirstIterator<VertexType, EdgeType, DirectedGraph>& other) const
+            DirectedDepthFirstIterator(const DirectedGraph* digraph, const VertexType& start):
+                m_graph(digraph), m_start(start), m_vertexStack(new std::stack<StackElem>),
+                m_visited(new std::unordered_set<VertexType>)
             {
-                if (!m_vertexStack.size())
-                    return !other.m_vertexStack.size();
-                else if (!other.m_vertexStack.size())
+                m_vertexStack->push({start, digraph->outNeighbors(start)});
+                m_visited->insert(start);
+                findDeadEnd();
+            }
+
+            const VertexType& dereference() const {return m_vertexStack->top().vertex;}
+
+            void findDeadEnd()
+            {
+                bool hasUnvisitedChildren;
+                do
+                {
+                    auto& range = m_vertexStack->top().outNeighborRange;
+                    hasUnvisitedChildren = false;
+                    for (; range.first != range.second; ++range.first)
+                    {
+                        if (!m_visited->count(*range.first))
+                        {
+                            m_vertexStack->push({*range.first, m_graph->outNeighbors(*range.first)});
+                            m_visited->insert(*range.first);
+                            hasUnvisitedChildren = true;
+                        }
+                    }
+                }
+                while (hasUnvisitedChildren);
+            }
+
+            bool equal(const DirectedDepthFirstIterator<VertexType, DirectedGraph>& other) const
+            {
+                bool otherStackIsEmpty = !other.m_vertexStack || !other.m_vertexStack->size();
+                if (!m_vertexStack || !m_vertexStack->size())
+                    return otherStackIsEmpty;
+                else if (otherStackIsEmpty)
                     return false;
                 // If they start with the same vertex and have traversed the same number of vertices, they are equal.
                 else
@@ -90,46 +163,15 @@ namespace graph
 
             void increment()
             {
-                VertexType vertex(m_vertexStack.top());
-                m_vertexStack.pop();
+                m_vertexStack->pop();
                 ++m_poppedCount;
-                for (auto iters(m_graph->outNeighbors(vertex)); iters.first != iters.second; ++iters.first)
-                {
-                    if (!m_visited.count(*iters.first))
-                    {
-                        m_vertexStack.push(*iters.first);
-                        m_visited.insert(*iters.first);
-                    }
-                }
+                if (m_vertexStack->size())
+                    findDeadEnd();
             }
 
         public:
             DirectedDepthFirstIterator() = default;
-            DirectedDepthFirstIterator(const DirectedGraph<VertexType, EdgeType>* digraph, const VertexType& start):
-                m_graph(digraph), m_start(start)
-            {
-                m_vertexStack.push(start);
-                m_visited.insert(start);
-            }
     };
-
-    // convenience function for creating a `DirectedBreadthFirstIterator`
-    template <typename VertexType, typename EdgeType, template <typename, typename> typename DirectedGraph>
-    auto directedBreadthFirst(const DirectedGraph<VertexType, EdgeType>& digraph, const VertexType& start)
-    {
-        return std::make_pair(
-            DirectedBreadthFirstIterator<VertexType, EdgeType, DirectedGraph>(&digraph, start),
-            DirectedBreadthFirstIterator<VertexType, EdgeType, DirectedGraph>());
-    }
-
-    // convenience function for creating a `DirectedDepthFirstIterator`
-    template <typename VertexType, typename EdgeType, template <typename, typename> typename DirectedGraph>
-    auto directedDepthFirst(const DirectedGraph<VertexType, EdgeType>& digraph, const VertexType& start)
-    {
-        return std::make_pair(
-            DirectedDepthFirstIterator<VertexType, EdgeType, DirectedGraph>(&digraph, start),
-            DirectedDepthFirstIterator<VertexType, EdgeType, DirectedGraph>());
-    }
 }
 
 #endif
