@@ -48,7 +48,6 @@ namespace graph
             DirectedAdjacencyList() = default;
             explicit DirectedAdjacencyList(std::size_t initialCapacity): m_adjMap(initialCapacity) {}
             DirectedAdjacencyList(const DirectedAdjacencyList<VertexType, EdgeType>& other) = default;
-
             DirectedAdjacencyList(DirectedAdjacencyList<VertexType, EdgeType>&& other) noexcept:
                 m_adjMap(std::move(other.m_adjMap)), m_order(other.m_order) {}
 
@@ -60,7 +59,8 @@ namespace graph
 
             auto vertices() const
             {
-                auto transform = [](const std::pair<VertexType, VertexInfo>& pair){return pair.first;};
+                VertexType (*transform)(const typename decltype(m_adjMap)::value_type&) =
+                    std::get<const VertexType, VertexInfo>;
                 return std::make_pair(
                     boost::make_transform_iterator(m_adjMap.cbegin(), transform),
                     boost::make_transform_iterator(m_adjMap.cend(), transform));
@@ -97,12 +97,19 @@ namespace graph
                 return boost::make_shared_container_range(neighbors);
             }
 
-            /*
             auto incidentInEdges(const VertexType& vertex)
             {
-                // TODO
+                auto incident(boost::make_shared<std::unordered_set<EdgeType>>());
+                for (const auto& elem: m_adjMap)
+                {
+                    for (const auto& edge: elem.second.outEdges)
+                    {
+                        if (edge.head() == vertex)
+                            incident->insert(edge);
+                    }
+                }
+                return boost::make_shared_container_range(incident);
             }
-            */
 
             auto incidentOutEdges(const VertexType& vertex) const
             {
@@ -198,7 +205,7 @@ namespace graph
                         m_listIter == m_mapIter->second.outEdges.cend());
             }
 
-            void seekNextNotIsolated()
+            void seekNextNotDeadEnd()
             {
                 for (; m_mapIter != m_outer->m_adjMap.cend(); ++m_mapIter)
                 {
@@ -228,7 +235,7 @@ namespace graph
                 if (std::next(m_listIter) == m_mapIter->second.outEdges.cend())
                 {
                     ++m_mapIter;
-                    seekNextNotIsolated();
+                    seekNextNotDeadEnd();
                 }
                 else
                     ++m_listIter;
@@ -243,7 +250,7 @@ namespace graph
                     m_outer(outer), m_mapIter(mapIter), m_listIter(listIter)
                 {
                     if (outer)
-                        seekNextNotIsolated();
+                        seekNextNotDeadEnd();
                 }
     };
 
