@@ -3,6 +3,8 @@
 
 #include <utility>
 #include <type_traits>
+#include <cstddef>
+#include <functional>
 
 namespace graph
 {
@@ -13,6 +15,8 @@ namespace graph
             VertexType m_tail, m_head;
 
         public:
+            using vertex_t = VertexType;
+
             template <typename T>
             Edge(T&& tail, T&& head): m_tail(std::forward<T>(tail)), m_head(std::forward<T>(head)) {}
 
@@ -33,6 +37,15 @@ namespace graph
                 return *this;
             }
     };
+
+    template <typename VertexType>
+    bool operator==(const Edge<VertexType>& first, const Edge<VertexType>& second)
+    {
+        return first.tail() == second.tail() && first.head() == second.head();
+    }
+
+    template <typename VertexType>
+    bool operator!=(const Edge<VertexType>& first, const Edge<VertexType>& second) {return !(first == second);}
 
     template <typename VertexType, typename WeightType>
     class WeightedEdge: public Edge<VertexType>
@@ -70,6 +83,19 @@ namespace graph
                 m_weight = other.m_weight;
                 return *this;
             }
+    };
+}
+
+namespace std
+{
+    template <typename VertexType>
+    struct hash<graph::Edge<VertexType>>
+    {
+        size_t operator()(const graph::Edge<VertexType>& edge) const
+        {
+            hash<VertexType> vertexHash;
+            return vertexHash(edge.tail()) ^ (vertexHash(edge.head()) << 1);
+        }
     };
 }
 
