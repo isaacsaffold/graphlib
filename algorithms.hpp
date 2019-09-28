@@ -13,11 +13,6 @@
 
 namespace graph
 {
-    template <typename VertexType, typename DirectedGraph>
-    class DirectedBreadthFirstIterator;
-    template <typename VertexType, typename DirectedGraph>
-    class DirectedDepthFirstIterator;
-
     #if __cplusplus < 201703
     template <typename F, typename... ArgsTypes>
     using return_t = std::result_of<F, ArgsTypes...>;
@@ -27,10 +22,19 @@ namespace graph
     #endif
 
     template <typename VertexType, typename DirectedGraph>
-    auto directedBreadthFirst(const DirectedGraph& digraph, const VertexType& start)
+    class DirectedBreadthFirstIterator;
+    template <typename VertexType, typename DirectedGraph>
+    class DirectedDepthFirstIterator;
+
+    template <typename VertexType>
+    using visitedPtr_t = std::shared_ptr<std::unordered_set<VertexType>>;
+
+    template <typename VertexType, typename DirectedGraph>
+    auto directedBreadthFirst(const DirectedGraph& digraph, const VertexType& start,
+        const visitedPtr_t<VertexType>& visited = std::make_shared<std::unordered_set<VertexType>>())
     {
         return std::make_pair(
-            DirectedBreadthFirstIterator<VertexType, DirectedGraph>(&digraph, start),
+            DirectedBreadthFirstIterator<VertexType, DirectedGraph>(&digraph, start, visited),
             DirectedBreadthFirstIterator<VertexType, DirectedGraph>());
     }
 
@@ -39,18 +43,20 @@ namespace graph
         DirectedBreadthFirstIterator<VertexType, DirectedGraph>, const VertexType, std::input_iterator_tag>
     {
         friend class boost::iterator_core_access;
-        friend auto directedBreadthFirst<VertexType, DirectedGraph>(const DirectedGraph&, const VertexType&);
+        friend auto directedBreadthFirst<VertexType, DirectedGraph>(
+            const DirectedGraph&, const VertexType&, const visitedPtr_t<VertexType>&);
 
         private:
             const DirectedGraph* m_graph = nullptr;
             VertexType m_start;
             std::shared_ptr<std::queue<VertexType>> m_vertexQueue;
-            std::shared_ptr<std::unordered_set<VertexType>> m_visited;
+            visitedPtr_t<VertexType> m_visited;
             std::size_t m_poppedCount = 0;
 
-            DirectedBreadthFirstIterator(const DirectedGraph* digraph, const VertexType& start):
+            DirectedBreadthFirstIterator(const DirectedGraph* digraph, const VertexType& start,
+                const visitedPtr_t<VertexType>& visited):
                 m_graph(digraph), m_start(start), m_vertexQueue(new std::queue<VertexType>),
-                m_visited(new std::unordered_set<VertexType>)
+                m_visited(visited)
             {
                 m_vertexQueue->push(start);
                 m_visited->insert(start);
@@ -90,10 +96,11 @@ namespace graph
     };
 
     template <typename VertexType, typename DirectedGraph>
-    auto directedDepthFirst(const DirectedGraph& digraph, const VertexType& start)
+    auto directedDepthFirst(const DirectedGraph& digraph, const VertexType& start,
+        const visitedPtr_t<VertexType>& visited = std::make_shared<std::unordered_set<VertexType>>())
     {
         return std::make_pair(
-            DirectedDepthFirstIterator<VertexType, DirectedGraph>(&digraph, start),
+            DirectedDepthFirstIterator<VertexType, DirectedGraph>(&digraph, start, visited),
             DirectedDepthFirstIterator<VertexType, DirectedGraph>());
     }
 
@@ -102,7 +109,8 @@ namespace graph
         DirectedDepthFirstIterator<VertexType, DirectedGraph>, const VertexType, std::input_iterator_tag>
     {
         friend class boost::iterator_core_access;
-        friend auto directedDepthFirst<VertexType, DirectedGraph>(const DirectedGraph&, const VertexType&);
+        friend auto directedDepthFirst<VertexType, DirectedGraph>(
+            const DirectedGraph&, const VertexType&, const visitedPtr_t<VertexType>&);
 
         private:
             struct StackElem
@@ -115,12 +123,13 @@ namespace graph
             const DirectedGraph* m_graph = nullptr;
             VertexType m_start;
             std::shared_ptr<std::stack<StackElem>> m_vertexStack;
-            std::shared_ptr<std::unordered_set<VertexType>> m_visited;
+            visitedPtr_t<VertexType> m_visited;
             std::size_t m_poppedCount = 0;
 
-            DirectedDepthFirstIterator(const DirectedGraph* digraph, const VertexType& start):
+            DirectedDepthFirstIterator(const DirectedGraph* digraph, const VertexType& start,
+                const visitedPtr_t<VertexType>& visited):
                 m_graph(digraph), m_start(start), m_vertexStack(new std::stack<StackElem>),
-                m_visited(new std::unordered_set<VertexType>)
+                m_visited(visited)
             {
                 m_vertexStack->push({start, digraph->outNeighbors(start)});
                 m_visited->insert(start);
