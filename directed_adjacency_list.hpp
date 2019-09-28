@@ -59,7 +59,7 @@ namespace graph
 
             auto vertices() const
             {
-                VertexType (*transform)(const typename decltype(m_adjMap)::value_type&) =
+                const VertexType& (*transform)(const typename decltype(m_adjMap)::value_type&) =
                     std::get<const VertexType, VertexInfo>;
                 return std::make_pair(
                     boost::make_transform_iterator(m_adjMap.cbegin(), transform),
@@ -68,11 +68,9 @@ namespace graph
 
             auto edges() const
             {
-                auto begin(m_adjMap.cbegin());
-                EdgeIterator rangeStart(begin != m_adjMap.cend()
-                    ? EdgeIterator(this, begin, begin->second.outEdges.cbegin())
-                    : EdgeIterator());
-                return std::make_pair(rangeStart, EdgeIterator());
+                auto range(std::make_pair(m_adjMap.cbegin(), m_adjMap.cend()));
+                return std::make_pair(range.first != range.second ? EdgeIterator(range) : EdgeIterator(),
+                    EdgeIterator());
             }
 
             auto inNeighbors(const VertexType& vertex) const
@@ -191,27 +189,25 @@ namespace graph
         friend class boost::iterator_core_access;
 
         private:
-            using mapIter_t = typename std::unordered_map<VertexType, VertexInfo>::const_iterator;
-            using listIter_t = typename std::forward_list<EdgeType>::const_iterator;
+            using mapIter_t = typename decltype(m_adjMap)::const_iterator;
 
-            const DirectedAdjacencyList<VertexType, EdgeType>* m_outer = nullptr;
-            mapIter_t m_mapIter;
-            listIter_t m_listIter;
+            std::pair<mapIter_t, mapIter_t> m_mapRange;
+            typename std::forward_list<EdgeType>::const_iterator m_listIter;
 
             bool isPastTheEnd() const
             {
-                return !m_outer || m_mapIter == m_outer->m_adjMap.cend() ||
-                       (std::next(m_mapIter) == m_outer->m_adjMap.cend() &&
-                        m_listIter == m_mapIter->second.outEdges.cend());
+                return m_mapRange.first == m_mapRange.second ||
+                       (std::next(m_mapRange.first) == m_mapRange.second &&
+                        m_listIter == m_mapRange.first->second.outEdges.cend());
             }
 
             void seekNextNotDeadEnd()
             {
-                for (; m_mapIter != m_outer->m_adjMap.cend(); ++m_mapIter)
+                for (; m_mapRange.first != m_mapRange.second; ++m_mapRange.first)
                 {
-                    if (!m_mapIter->second.outEdges.empty())
+                    if (!m_mapRange.first->second.outEdges.empty())
                     {
-                        m_listIter = m_mapIter->second.outEdges.cbegin();
+                        m_listIter = m_mapRange.first->second.outEdges.cbegin();
                         break;
                     }
                 }
@@ -227,14 +223,14 @@ namespace graph
                 else if (otherPastTheEnd)
                     return false;
                 else
-                    return m_mapIter == other.m_mapIter && m_listIter == other.m_listIter;
+                    return m_mapRange.first == other.m_mapRange.first && m_listIter == other.m_listIter;
             }
 
             void increment()
             {
-                if (std::next(m_listIter) == m_mapIter->second.outEdges.cend())
+                if (std::next(m_listIter) == m_mapRange.first->second.outEdges.cend())
                 {
-                    ++m_mapIter;
+                    ++m_mapRange.first;
                     seekNextNotDeadEnd();
                 }
                 else
@@ -243,15 +239,8 @@ namespace graph
 
         public:
             EdgeIterator() = default;
-            EdgeIterator(
-                const DirectedAdjacencyList<VertexType, EdgeType>* outer,
-                const mapIter_t& mapIter,
-                const listIter_t& listIter):
-                    m_outer(outer), m_mapIter(mapIter), m_listIter(listIter)
-                {
-                    if (outer)
-                        seekNextNotDeadEnd();
-                }
+            explicit EdgeIterator(const std::pair<mapIter_t, mapIter_t>& mapRange):
+                    m_mapRange(mapRange), m_listIter(m_mapRange.first->second.outEdges.cbegin()) {seekNextNotDeadEnd();}
     };
 
     template <typename VertexType>
