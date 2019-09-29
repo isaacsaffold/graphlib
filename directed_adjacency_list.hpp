@@ -47,9 +47,6 @@ namespace graph
 
             DirectedAdjacencyList() = default;
             explicit DirectedAdjacencyList(std::size_t initialCapacity): m_adjMap(initialCapacity) {}
-            DirectedAdjacencyList(const DirectedAdjacencyList<VertexType, EdgeType>& other) = default;
-            DirectedAdjacencyList(DirectedAdjacencyList<VertexType, EdgeType>&& other) noexcept:
-                m_adjMap(std::move(other.m_adjMap)), m_order(other.m_order) {}
 
             std::size_t size() const {return m_adjMap.size();}
             std::size_t order() const {return m_order;}
@@ -166,20 +163,6 @@ namespace graph
             {
                 return addEdgeIfNotPresent(EdgeType(std::forward<Args>(args)...));
             }
-
-            DirectedAdjacencyList<VertexType, EdgeType>& operator=(
-                const DirectedAdjacencyList<VertexType, EdgeType>& other) = default;
-
-            DirectedAdjacencyList<VertexType, EdgeType>& operator=(
-                DirectedAdjacencyList<VertexType, EdgeType>&& other) noexcept
-            {
-                if (&other != this)
-                {
-                    m_adjMap = std::move(other.m_adjMap);
-                    m_order = other.m_order;
-                }
-                return *this;
-            }
     };
 
     template <typename VertexType, typename EdgeType>
@@ -244,10 +227,11 @@ namespace graph
     };
 
     template <typename VertexType>
-    using basicDirectedAdjacencyList_t = DirectedAdjacencyList<VertexType, Edge<VertexType>>;
+    using basicDirectedAdjacencyList_t = DirectedAdjacencyList<VertexType, Edge<VertexType, true>>;
 
     template <typename VertexType, typename WeightType>
-    using weightedDirectedAdjacencyList_t = DirectedAdjacencyList<VertexType, WeightedEdge<VertexType, WeightType>>;
+    using weightedDirectedAdjacencyList_t =
+        DirectedAdjacencyList<VertexType, WeightedEdge<VertexType, true, WeightType>>;
 }
 
 #endif
