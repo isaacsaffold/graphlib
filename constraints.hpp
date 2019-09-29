@@ -12,10 +12,16 @@ namespace graph
         NO_LOOPS = 1,
         NO_MULTIPLE_EDGES = 2,
         SIMPLE = 3,
+        // means weakly connected in the case of digraphs
         CONNECTED = 4,
         CONNECTED_AND_NO_LOOPS = 5,
         CONNECTED_AND_NO_MULTIPLE_EDGES = 6,
-        SIMPLY_CONNECTED = 7
+        SIMPLY_CONNECTED = 7,
+        // contains `CONNECTED`
+        STRONGLY_CONNECTED = 12,
+        STRONGLY_CONNECTED_AND_NO_LOOPS = 13,
+        STRONGLY_CONNECTED_AND_NO_MULTIPLE_EDGES = 14,
+        SIMPLY_STRONGLY_CONNECTED = 15
     };
 
     constexpr Constraints operator&(Constraints a, Constraints b)
