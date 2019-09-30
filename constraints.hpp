@@ -21,7 +21,16 @@ namespace graph
         STRONGLY_CONNECTED = 12,
         STRONGLY_CONNECTED_AND_NO_LOOPS = 13,
         STRONGLY_CONNECTED_AND_NO_MULTIPLE_EDGES = 14,
-        SIMPLY_STRONGLY_CONNECTED = 15
+        SIMPLY_STRONGLY_CONNECTED = 15,
+        // contains `NO_LOOPS`
+        ACYCLIC = 17,
+        SIMPLE_ACYCLIC = 19,
+        CONNECTED_ACYCLIC = 21,
+        SIMPLY_CONNECTED_ACYCLIC = 23,
+        // undirected and `SIMPLE_ACYCLIC`
+        FOREST = 51,
+        // undirected and `SIMPLY_CONNECTED_ACYCLIC`
+        TREE = 55
     };
 
     constexpr Constraints operator&(Constraints a, Constraints b)
@@ -53,7 +62,7 @@ namespace graph
     class ConstraintViolationException: public std::runtime_error
     {
         private:
-            static const char* exceptionString(Constraints constraints)
+            static const char* exceptionString(Constraints constraints) noexcept
             {
                 switch (constraints)
                 {
@@ -71,6 +80,30 @@ namespace graph
                         return "Graph must be connected and cannot contain multiple edges.";
                     case Constraints::SIMPLY_CONNECTED:
                         return "Graph must be connected and simple (i.e. must not contain loops or multiple edges).";
+                    case Constraints::STRONGLY_CONNECTED:
+                        return "Graph must be strongly connected.";
+                    case Constraints::STRONGLY_CONNECTED_AND_NO_LOOPS:
+                        return "Graph must be strongly connected and cannot contain loops.";
+                    case Constraints::STRONGLY_CONNECTED_AND_NO_MULTIPLE_EDGES:
+                        return "Graph must be strongly connected and cannot contain multiple edges.";
+                    case Constraints::SIMPLY_STRONGLY_CONNECTED:
+                        return "Graph must be strongly connected and simple (i.e. must not contain loops or multiple "
+                               "edges).";
+                    case Constraints::ACYCLIC:
+                        return "Graph must be acyclic.";
+                    case Constraints::SIMPLE_ACYCLIC:
+                        return "Graph must be simple (i.e. must not contain loops or multiple edges) and acyclic.";
+                    case Constraints::CONNECTED_ACYCLIC:
+                        return "Graph must be connected and acyclic.";
+                    case Constraints::SIMPLY_CONNECTED_ACYCLIC:
+                        return "Graph must be simple (i.e. must not contain loops or multiple edges), connected, and "
+                               "acyclic.";
+                    case Constraints::FOREST:
+                        return "Graph must be undirected, simple (i.e. must not contain loops or multiple edges), "
+                               "and acyclic.";
+                    case Constraints::TREE:
+                        return "Graph must be undirected, simple (i.e. must not contain loops or multiple edges), "
+                               "connected, and acyclic.";
                     default:
                         return "";
                 }
