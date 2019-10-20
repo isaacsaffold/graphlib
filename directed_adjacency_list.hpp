@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <forward_list>
 #include <type_traits>
+#include <limits>
 
 #include "constraints.hpp"
 #include "edge_wrapper.hpp"
@@ -97,6 +98,31 @@ namespace graph
                 return addEndvertices(tail, head);
             }
 
+            template <typename Predicate>
+            SizeType implRemoveEdges(const Vertex& tail, const Vertex& head, SizeType n, Predicate pred)
+            {
+                auto tailIter(m_adjMap.find(tail));
+                if (tailIter == m_adjMap.end())
+                    return 0;
+                std::forward_list<adjInfo_t>& outNeighbors = tailIter->second.outNeighbors;
+                SizeType k = 0;
+                auto before(outNeighbors.before_begin()), current(outNeighbors.begin());
+                while (k < n && current != outNeighbors.end())
+                {
+                    if (pred(tail, head, *current))
+                    {
+                        --tailIter->second.outdegree;
+                        --m_adjMap.at(current->vertex).indegree;
+                        current = outNeighbors.erase_after(before);
+                        ++k;
+                    }
+                    else
+                        before = current++;
+                }
+                m_order -= k;
+                return k;
+            }
+
         public:
             SizeType size() const {return m_adjMap.size();}
             SizeType order() const {return m_order;}
@@ -106,7 +132,7 @@ namespace graph
 
             bool contains(const Vertex& vertex) const {return m_adjMap.count(vertex);}
 
-            template <typename E = Edge, std::enable_if_t<!std::is_void<E>::value, bool> = true>
+            template <typename E, std::enable_if_t<!std::is_void<E>::value, bool> = true>
             bool contains(const E& edge) const
             {
                 for (const auto& elem: m_adjMap)
@@ -155,7 +181,60 @@ namespace graph
                 addEndverticesIfValid(tail, head).edge = edge;
             }
 
-            // TODO: Add more mutator methods (e.g. for removing vertices and edges).
+            // Parameter `n` in `removeEdges` does not have a default because that would cause an ambiguity between
+            // `removeEdges(Vertex, Vertex, SizeType)` and `removeEdges(Vertex, Vertex, Edge)` when `Edge` and
+            // `SizeType` are the same, and other permutations of the parameters could also cause ambiguities.
+
+            SizeType removeEdges(const Vertex& tail, const Vertex& head, SizeType n)
+            {
+                auto pred = [](const Vertex& tail, const Vertex& head, const adjInfo_t& adjInfo)
+                {
+                    return head == adjInfo.vertex;
+                };
+                return implRemoveEdges(tail, head, n, pred);
+            }
+
+            template <typename E, std::enable_if_t<!std::is_void<E>::value, bool> = true>
+            SizeType removeEdges(const Vertex& tail, const Vertex& head, const E& edge, SizeType n)
+            {
+                auto pred = [&](const Vertex& tail, const Vertex& head, const adjInfo_t& adjInfo)
+                {
+                    return head == adjInfo.vertex && edge == adjInfo.edge;
+                };
+                return implRemoveEdges(tail, head, n, pred);
+            }
+
+            bool removeEdge(const Vertex& tail, const Vertex& head) {return removeEdges(tail, head, 1);}
+
+            template <typename E, std::enable_if_t<!std::is_void<E>::value, bool> = true>
+            bool removeEdge(const Vertex& tail, const Vertex& head, const E& edge)
+            {
+                return removeEdges(tail, head, edge, 1);
+            }
+
+            SizeType removeAllEdges(const Vertex& tail, const Vertex& head)
+            {
+                return removeEdges(tail, head, std::numeric_limits<SizeType>::max());
+            }
+
+            template <typename E, std::enable_if_t<!std::is_void<E>::value, bool> = true>
+            SizeType removeAllEdges(const Vertex& tail, const Vertex& head, const E& edge)
+            {
+                return removeEdges(tail, head, edge, std::numeric_limits<SizeType>::max());
+            }
+
+            bool removeVertex(const Vertex& vertex)
+            {
+                auto iter(m_adjMap.find(vertex));
+                if (iter == m_adjMap.end())
+                    return false;
+                for (adjInfo_t& adjInfo: iter->second.outNeighbors)
+                    --m_adjMap.at(adjInfo.vertex).indegree, --m_order;
+                for (auto& elem: m_adjMap)
+                    removeAllEdges(elem.first, vertex);
+                m_adjMap.erase(iter);
+                return true;
+            }
     };
 }
 
