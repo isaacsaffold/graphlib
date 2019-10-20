@@ -8,14 +8,14 @@ namespace graph
     template <typename Vertex>
     struct p_ImplicitEdgeWrapper
     {
-        const Vertex &tail, &head;
+        Vertex *tail, *head;
     };
 
     template <typename Vertex, typename Edge>
     struct p_EdgeWrapper
     {
-        const Vertex &tail, &head;
-        Edge& edge;
+        Vertex *tail, *head;
+        Edge* edge;
     };
 
     template <typename Vertex, typename Edge = void>
