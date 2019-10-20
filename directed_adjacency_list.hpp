@@ -61,7 +61,7 @@ namespace graph
 
         private:
             std::unordered_map<Vertex, TailInfo> m_adjMap;
-            SizeType m_order = 0;
+            SizeType m_size = 0;
 
         public:
             DirectedAdjacencyList() = default;
@@ -78,7 +78,7 @@ namespace graph
                 if (headIter == m_adjMap.end())
                     headIter = m_adjMap.emplace(head, TailInfo{}).first;
                 TailInfo& tailInfo = tailIter->second;
-                ++m_order, ++tailInfo.outdegree, ++headIter->second.indegree;
+                ++m_size, ++tailInfo.outdegree, ++headIter->second.indegree;
                 return *tailInfo.outNeighbors.insert_after(tailInfo.outNeighbors.before_begin(), {head});
             }
 
@@ -119,13 +119,13 @@ namespace graph
                     else
                         before = current++;
                 }
-                m_order -= k;
+                m_size -= k;
                 return k;
             }
 
         public:
-            SizeType size() const {return m_adjMap.size();}
-            SizeType order() const {return m_order;}
+            SizeType order() const {return m_adjMap.size();}
+            SizeType size() const {return m_size;}
 
             SizeType indegree(const Vertex& vertex) const {return m_adjMap.at(vertex).indegree;}
             SizeType outdegree(const Vertex& vertex) const {return m_adjMap.at(vertex).outdegree;}
@@ -229,7 +229,7 @@ namespace graph
                 if (iter == m_adjMap.end())
                     return false;
                 for (adjInfo_t& adjInfo: iter->second.outNeighbors)
-                    --m_adjMap.at(adjInfo.vertex).indegree, --m_order;
+                    --m_adjMap.at(adjInfo.vertex).indegree, --m_size;
                 for (auto& elem: m_adjMap)
                     removeAllEdges(elem.first, vertex);
                 m_adjMap.erase(iter);
