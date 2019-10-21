@@ -6,6 +6,9 @@
 #include <forward_list>
 #include <type_traits>
 #include <limits>
+#include <utility>
+#include <boost/iterator/transform_iterator.hpp>
+#include <boost/utility/result_of.hpp>
 
 #include "constraints.hpp"
 #include "edge_wrapper.hpp"
@@ -160,7 +163,15 @@ namespace graph
                 return false;
             }
 
-            // TODO: Add iterators.
+            auto vertices() const
+            {
+                const Vertex& (*transform)(const std::pair<const Vertex, TailInfo>&) = std::get<const Vertex, TailInfo>;
+                return std::make_pair(
+                    boost::make_transform_iterator(m_adjMap.begin(), transform),
+                    boost::make_transform_iterator(m_adjMap.end(), transform));
+            }
+            using vertexIter_t =
+                decltype(typename boost::result_of<decltype(&DirectedAdjacencyList::vertices)()>::type().first);
 
             template <typename V, std::enable_if_t<
                 (constraints & Constraints::CONNECTED) == 0 && std::is_same<V, V>::value, bool> = true>
