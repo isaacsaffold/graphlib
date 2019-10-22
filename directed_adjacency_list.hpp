@@ -3,11 +3,13 @@
 
 #include <cstddef>
 #include <unordered_map>
-#include <forward_list>
+#include <list>
 #include <type_traits>
 #include <limits>
 #include <utility>
+#include <functional>
 #include <boost/iterator/transform_iterator.hpp>
+#include <boost/iterator/iterator_adaptor.hpp>
 #include <boost/utility/result_of.hpp>
 
 #include "constraints.hpp"
@@ -35,9 +37,31 @@ namespace graph
 
             struct TailInfo
             {
-                std::forward_list<adjInfo_t> outNeighbors;
+                std::list<adjInfo_t> outNeighbors;
                 SizeType indegree = 0, outdegree = 0;
             };
+
+            // facilitates the use of iterators to remove edges efficiently, via `std::list.erase(const_iterator)`
+            template <typename Iterator>
+            class EdgeIteratorWrapper final: public boost::iterator_adaptor<EdgeIteratorWrapper<Iterator>, Iterator>
+            {
+                private:
+                    std::pair<const Vertex, TailInfo>* m_edgeInfo = nullptr;
+
+                public:
+                    EdgeIteratorWrapper() = default;
+                    explicit EdgeIteratorWrapper(const Iterator& iter, std::pair<const Vertex, TailInfo>& edgeInfo):
+                        EdgeIteratorWrapper::iterator_adaptor_(iter), m_edgeInfo(&edgeInfo) {}
+
+                    std::pair<const Vertex, TailInfo>& edgeInfo() const {return *m_edgeInfo;}
+            };
+
+            template <typename Iterator>
+            static EdgeIteratorWrapper<Iterator> makeEdgeIteratorWrapper(
+                const Iterator& iter, std::pair<const Vertex, TailInfo>& edgeInfo)
+            {
+                return EdgeIteratorWrapper<Iterator>(iter, edgeInfo);
+            }
 
             // Arguments to `edgeWrapper` should always be l-values.
 
@@ -52,6 +76,28 @@ namespace graph
             {
                 static_assert(std::is_same<typename std::remove_const_t<E>, Edge>::value);
                 return {&tail, &adjInfo.vertex, &adjInfo.edge};
+            }
+
+            static auto implOutNeighbors(std::pair<const Vertex, TailInfo>& edgeInfo)
+            {
+                std::function<edgeWrapper_t<const Vertex, Edge>(const adjInfo_t&)> transform(
+                    [&](const adjInfo_t& adjInfo){return edgeWrapper<Edge>(edgeInfo.first, adjInfo);});
+                std::list<adjInfo_t>& outNeighbors = edgeInfo.second.outNeighbors;
+                return std::make_pair(
+                    makeEdgeIteratorWrapper(
+                        boost::make_transform_iterator(outNeighbors.begin(), transform), edgeInfo),
+                    makeEdgeIteratorWrapper(
+                        boost::make_transform_iterator(outNeighbors.end(), transform), edgeInfo));
+            }
+
+            static auto implConstOutNeighbors(const std::pair<const Vertex, TailInfo>& edgeInfo)
+            {
+                std::function<edgeWrapper_t<const Vertex, const Edge>(const adjInfo_t&)> transform(
+                    [&](const adjInfo_t& adjInfo){return edgeWrapper<const Edge>(edgeInfo.first, adjInfo);});
+                const std::list<adjInfo_t>& outNeighbors = edgeInfo.second.outNeighbors;
+                return std::make_pair(
+                    boost::make_transform_iterator(outNeighbors.begin(), transform),
+                    boost::make_transform_iterator(outNeighbors.end(), transform));
             }
 
         public:
@@ -82,7 +128,8 @@ namespace graph
                     headIter = m_adjMap.emplace(head, TailInfo{}).first;
                 TailInfo& tailInfo = tailIter->second;
                 ++m_size, ++tailInfo.outdegree, ++headIter->second.indegree;
-                return *tailInfo.outNeighbors.insert_after(tailInfo.outNeighbors.before_begin(), {head});
+                tailInfo.outNeighbors.push_back({head});
+                return tailInfo.outNeighbors.back();
             }
 
             template <typename V, std::enable_if_t<
@@ -102,36 +149,74 @@ namespace graph
             }
 
             template <typename Predicate>
-            SizeType implRemoveEdges(const Vertex& tail, const Vertex& head, SizeType n, Predicate pred)
+            SizeType implRemoveEdges(const Vertex& tail, const Vertex& head, SizeType n, Predicate&& pred)
             {
                 auto tailIter(m_adjMap.find(tail));
                 if (tailIter == m_adjMap.end())
                     return 0;
-                std::forward_list<adjInfo_t>& outNeighbors = tailIter->second.outNeighbors;
+                std::list<adjInfo_t>& outNeighbors = tailIter->second.outNeighbors;
                 SizeType k = 0;
-                auto before(outNeighbors.before_begin()), current(outNeighbors.begin());
-                while (k < n && current != outNeighbors.end())
+                auto iter(outNeighbors.begin());
+                while (k < n && iter != outNeighbors.end())
                 {
-                    if (pred(tail, head, *current))
+                    if (pred(tail, head, *iter))
                     {
                         --tailIter->second.outdegree;
-                        --m_adjMap.at(current->vertex).indegree;
-                        current = outNeighbors.erase_after(before);
+                        --m_adjMap.at(iter->vertex).indegree;
+                        iter = outNeighbors.erase(iter);
                         ++k;
                     }
                     else
-                        before = current++;
+                        ++iter;
                 }
                 m_size -= k;
                 return k;
             }
 
         public:
+            auto vertices() const
+            {
+                const Vertex& (*transform)(const std::pair<const Vertex, TailInfo>&) = std::get<const Vertex, TailInfo>;
+                return std::make_pair(
+                    boost::make_transform_iterator(m_adjMap.begin(), transform),
+                    boost::make_transform_iterator(m_adjMap.end(), transform));
+            }
+
+            using vertexIter_t =
+                decltype(typename boost::result_of<decltype(&DirectedAdjacencyList::vertices)()>::type().first);
+
+            using outNeighborIter_t = decltype(typename boost::result_of<
+                decltype(&DirectedAdjacencyList::implOutNeighbors)(std::pair<const Vertex, TailInfo>&)>::type().first);
+
+            auto outNeighbors(const Vertex& tail)
+            {
+                auto tailIter(m_adjMap.find(tail));
+                return tailIter != m_adjMap.end()
+                    ? implOutNeighbors(*tailIter)
+                    : std::pair<outNeighborIter_t, outNeighborIter_t>();
+            }
+
+            using constOutNeighborIter_t = decltype(typename boost::result_of<
+                decltype(&DirectedAdjacencyList::implConstOutNeighbors)(
+                    const std::pair<const Vertex, TailInfo>&)>::type().first);
+
+            auto outNeighbors(const Vertex& tail) const
+            {
+                auto tailIter(m_adjMap.find(tail));
+                return tailIter != m_adjMap.end()
+                    ? implConstOutNeighbors(*tailIter)
+                    : std::pair<constOutNeighborIter_t, constOutNeighborIter_t>();
+            }
+
+            auto constOutNeighbors(const Vertex& tail) const {return outNeighbors(tail);}
+
             SizeType order() const {return m_adjMap.size();}
             SizeType size() const {return m_size;}
 
             SizeType indegree(const Vertex& vertex) const {return m_adjMap.at(vertex).indegree;}
+            SizeType indegree(const vertexIter_t& iter) const {return iter.base()->second.indegree;}
             SizeType outdegree(const Vertex& vertex) const {return m_adjMap.at(vertex).outdegree;}
+            SizeType outdegree(const vertexIter_t& iter) const {return iter.base()->second.outdegree;}
 
             bool contains(const Vertex& vertex) const {return m_adjMap.count(vertex);}
 
@@ -163,16 +248,6 @@ namespace graph
                 return false;
             }
 
-            auto vertices() const
-            {
-                const Vertex& (*transform)(const std::pair<const Vertex, TailInfo>&) = std::get<const Vertex, TailInfo>;
-                return std::make_pair(
-                    boost::make_transform_iterator(m_adjMap.begin(), transform),
-                    boost::make_transform_iterator(m_adjMap.end(), transform));
-            }
-            using vertexIter_t =
-                decltype(typename boost::result_of<decltype(&DirectedAdjacencyList::vertices)()>::type().first);
-
             template <typename V, std::enable_if_t<
                 (constraints & Constraints::CONNECTED) == 0 && std::is_same<V, V>::value, bool> = true>
             bool addVertex(V&& vertex)
@@ -202,7 +277,7 @@ namespace graph
                 {
                     return head == adjInfo.vertex;
                 };
-                return implRemoveEdges(tail, head, n, pred);
+                return implRemoveEdges(tail, head, n, std::move(pred));
             }
 
             template <typename E, std::enable_if_t<!std::is_void<E>::value, bool> = true>
@@ -212,7 +287,7 @@ namespace graph
                 {
                     return head == adjInfo.vertex && edge == adjInfo.edge;
                 };
-                return implRemoveEdges(tail, head, n, pred);
+                return implRemoveEdges(tail, head, n, std::move(pred));
             }
 
             bool removeEdge(const Vertex& tail, const Vertex& head) {return removeEdges(tail, head, 1);}
@@ -221,6 +296,18 @@ namespace graph
             bool removeEdge(const Vertex& tail, const Vertex& head, const E& edge)
             {
                 return removeEdges(tail, head, edge, 1);
+            }
+
+            template <typename Iterator>
+            void removeEdge(EdgeIteratorWrapper<Iterator>& iter)
+            {
+                auto baseIter(iter.base().base());
+                TailInfo& tailInfo = iter.edgeInfo().second;
+                --tailInfo.outdegree;
+                --m_adjMap.at(baseIter->vertex).indegree;
+                --m_size;
+                ++iter;
+                tailInfo.outNeighbors.erase(baseIter);
             }
 
             SizeType removeAllEdges(const Vertex& tail, const Vertex& head)
