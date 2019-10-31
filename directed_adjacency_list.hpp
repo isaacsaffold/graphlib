@@ -173,6 +173,17 @@ namespace graph
                 return k;
             }
 
+            template <typename EdgeIterator>
+            void implRemoveEdge(EdgeIterator&& iter, typename std::list<adjInfo_t>::iterator baseIter)
+            {
+                TailInfo& tailInfo = iter.edgeInfo().second;
+                --tailInfo.outdegree;
+                --m_adjMap.at(baseIter->vertex).indegree;
+                --m_size;
+                ++iter;
+                tailInfo.outNeighbors.erase(baseIter);
+            }
+
         public:
             auto vertices() const
             {
@@ -298,17 +309,8 @@ namespace graph
                 return removeEdges(tail, head, edge, 1);
             }
 
-            template <typename Iterator>
-            void removeEdge(EdgeIteratorWrapper<Iterator>& iter)
-            {
-                auto baseIter(iter.base().base());
-                TailInfo& tailInfo = iter.edgeInfo().second;
-                --tailInfo.outdegree;
-                --m_adjMap.at(baseIter->vertex).indegree;
-                --m_size;
-                ++iter;
-                tailInfo.outNeighbors.erase(baseIter);
-            }
+            template <typename EdgeIterator>
+            void removeEdge(EdgeIterator&& iter) {implRemoveEdge(iter, iter.base().base());}
 
             SizeType removeAllEdges(const Vertex& tail, const Vertex& head)
             {
