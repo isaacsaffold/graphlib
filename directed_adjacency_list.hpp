@@ -219,6 +219,7 @@ namespace graph
             using outNeighborIter_t = decltype(typename boost::result_of<
                 decltype(&DirectedAdjacencyList::implOutNeighbors)(std::pair<const Vertex, TailInfo>&)>::type().first);
 
+            template <typename E = Edge, std::enable_if_t<!std::is_void<E>::value, bool> = true>
             auto outNeighbors(const Vertex& tail)
             {
                 auto tailIter(m_adjMap.find(tail));
