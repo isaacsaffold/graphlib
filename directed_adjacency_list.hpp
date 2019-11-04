@@ -8,8 +8,11 @@
 #include <limits>
 #include <utility>
 #include <functional>
+#include <iterator>
+#include <boost/optional.hpp>
 #include <boost/iterator/transform_iterator.hpp>
 #include <boost/iterator/iterator_adaptor.hpp>
+#include <boost/iterator/iterator_facade.hpp>
 #include <boost/utility/result_of.hpp>
 
 #include "constraints.hpp"
@@ -22,6 +25,9 @@ namespace graph
     class DirectedAdjacencyList final
     {
         private:
+            template <typename Value>
+            class AllEdgeIterator;
+
             struct ImplicitAdjacencyInfo
             {
                 Vertex vertex;
@@ -41,38 +47,44 @@ namespace graph
                 SizeType indegree = 0, outdegree = 0;
             };
 
+            template <typename Iterator>
+            using baseGetter_t = std::function<typename std::list<adjInfo_t>::iterator(Iterator&)>;
+
             // facilitates the use of iterators to remove edges efficiently, via `std::list.erase(const_iterator)`
             template <typename Iterator>
             class EdgeIteratorWrapper final: public boost::iterator_adaptor<EdgeIteratorWrapper<Iterator>, Iterator>
             {
                 private:
-                    std::pair<const Vertex, TailInfo>* m_edgeInfo = nullptr;
+                    baseGetter_t<Iterator> m_baseGetter;
 
                 public:
                     EdgeIteratorWrapper() = default;
-                    explicit EdgeIteratorWrapper(const Iterator& iter, std::pair<const Vertex, TailInfo>& edgeInfo):
-                        EdgeIteratorWrapper::iterator_adaptor_(iter), m_edgeInfo(&edgeInfo) {}
+                    EdgeIteratorWrapper(const Iterator& iter, baseGetter_t<Iterator> baseGetter):
+                        EdgeIteratorWrapper::iterator_adaptor_(iter), m_baseGetter(baseGetter) {}
 
-                    std::pair<const Vertex, TailInfo>& edgeInfo() const {return *m_edgeInfo;}
+                    typename std::list<adjInfo_t>::iterator deepBase()
+                    {
+                        return m_baseGetter(EdgeIteratorWrapper::iterator_adaptor_::base_reference());
+                    }
             };
 
             template <typename Iterator>
-            static EdgeIteratorWrapper<Iterator> makeEdgeIteratorWrapper(
-                const Iterator& iter, std::pair<const Vertex, TailInfo>& edgeInfo)
+            static EdgeIteratorWrapper<Iterator> makeEdgeIteratorWrapper(const Iterator& iter,
+                baseGetter_t<Iterator> baseGetter)
             {
-                return EdgeIteratorWrapper<Iterator>(iter, edgeInfo);
+                return EdgeIteratorWrapper<Iterator>(iter, baseGetter);
             }
 
             // Arguments to `edgeWrapper` should always be l-values.
 
-            template <typename E, std::enable_if_t<std::is_void<E>::value, bool> = true>
-            static edgeWrapper_t<const Vertex, E> edgeWrapper(const Vertex& tail, const adjInfo_t& adjInfo)
+            template <typename E, typename A, std::enable_if_t<std::is_void<E>::value, bool> = true>
+            static edgeWrapper_t<const Vertex, E> edgeWrapper(const Vertex& tail, A& adjInfo)
             {
                 return {&tail, &adjInfo.vertex};
             }
 
-            template <typename E, std::enable_if_t<!std::is_void<E>::value, bool> = true>
-            static edgeWrapper_t<const Vertex, E> edgeWrapper(const Vertex& tail, const adjInfo_t& adjInfo)
+            template <typename E, typename A, std::enable_if_t<!std::is_void<E>::value, bool> = true>
+            static edgeWrapper_t<const Vertex, E> edgeWrapper(const Vertex& tail, A& adjInfo)
             {
                 static_assert(std::is_same<typename std::remove_const_t<E>, Edge>::value);
                 return {&tail, &adjInfo.vertex, &adjInfo.edge};
@@ -80,19 +92,20 @@ namespace graph
 
             static auto implOutNeighbors(std::pair<const Vertex, TailInfo>& edgeInfo)
             {
-                std::function<edgeWrapper_t<const Vertex, Edge>(const adjInfo_t&)> transform(
-                    [&](const adjInfo_t& adjInfo){return edgeWrapper<Edge>(edgeInfo.first, adjInfo);});
+                std::function<const edgeWrapper_t<const Vertex, Edge>(adjInfo_t&)> transform(
+                    [&](adjInfo_t& adjInfo){return edgeWrapper<Edge>(edgeInfo.first, adjInfo);});
                 std::list<adjInfo_t>& outNeighbors = edgeInfo.second.outNeighbors;
+                auto begin(boost::make_transform_iterator(outNeighbors.begin(), transform));
+                baseGetter_t<decltype(begin)> baseGetter(&decltype(begin)::base);
                 return std::make_pair(
+                    makeEdgeIteratorWrapper(begin, baseGetter),
                     makeEdgeIteratorWrapper(
-                        boost::make_transform_iterator(outNeighbors.begin(), transform), edgeInfo),
-                    makeEdgeIteratorWrapper(
-                        boost::make_transform_iterator(outNeighbors.end(), transform), edgeInfo));
+                        boost::make_transform_iterator(outNeighbors.end(), transform), baseGetter));
             }
 
             static auto implConstOutNeighbors(const std::pair<const Vertex, TailInfo>& edgeInfo)
             {
-                std::function<edgeWrapper_t<const Vertex, const Edge>(const adjInfo_t&)> transform(
+                std::function<const edgeWrapper_t<const Vertex, const Edge>(const adjInfo_t&)> transform(
                     [&](const adjInfo_t& adjInfo){return edgeWrapper<const Edge>(edgeInfo.first, adjInfo);});
                 const std::list<adjInfo_t>& outNeighbors = edgeInfo.second.outNeighbors;
                 return std::make_pair(
@@ -173,17 +186,6 @@ namespace graph
                 return k;
             }
 
-            template <typename EdgeIterator>
-            void implRemoveEdge(EdgeIterator&& iter, typename std::list<adjInfo_t>::iterator baseIter)
-            {
-                TailInfo& tailInfo = iter.edgeInfo().second;
-                --tailInfo.outdegree;
-                --m_adjMap.at(baseIter->vertex).indegree;
-                --m_size;
-                ++iter;
-                tailInfo.outNeighbors.erase(baseIter);
-            }
-
         public:
             auto vertices() const
             {
@@ -195,6 +197,24 @@ namespace graph
 
             using vertexIter_t =
                 decltype(typename boost::result_of<decltype(&DirectedAdjacencyList::vertices)()>::type().first);
+
+            using allEdgeIter_t = AllEdgeIterator<edgeWrapper_t<const Vertex, Edge>>;
+
+            template <typename E = Edge, std::enable_if_t<!std::is_void<E>::value, bool> = true>
+            auto edges()
+            {
+                return std::make_pair(allEdgeIter_t(std::make_pair(m_adjMap.begin(), m_adjMap.end())), allEdgeIter_t());
+            }
+
+            using constAllEdgeIter_t = AllEdgeIterator<edgeWrapper_t<const Vertex, const Edge>>;
+
+            auto edges() const
+            {
+                return std::make_pair(
+                    constAllEdgeIter_t(std::make_pair(m_adjMap.begin(), m_adjMap.end())), constAllEdgeIter_t());
+            }
+
+            auto constEdges() const {return edges();}
 
             using outNeighborIter_t = decltype(typename boost::result_of<
                 decltype(&DirectedAdjacencyList::implOutNeighbors)(std::pair<const Vertex, TailInfo>&)>::type().first);
@@ -310,7 +330,17 @@ namespace graph
             }
 
             template <typename EdgeIterator>
-            void removeEdge(EdgeIterator&& iter) {implRemoveEdge(iter, iter.base().base());}
+            void removeEdge(EdgeIterator&& iter)
+            {
+                auto baseIter(iter.deepBase());
+                auto wrapper(*iter);
+                TailInfo& tailInfo = m_adjMap.at(*wrapper.tail);
+                --tailInfo.outdegree;
+                --m_adjMap.at(*wrapper.head).indegree;
+                --m_size;
+                ++iter;
+                tailInfo.outNeighbors.erase(baseIter);
+            }
 
             SizeType removeAllEdges(const Vertex& tail, const Vertex& head)
             {
@@ -335,6 +365,119 @@ namespace graph
                 m_adjMap.erase(iter);
                 return true;
             }
+    };
+
+    /*
+     * Almost conforms to `LegacyForwardIterator`. There is only one deviation and it is insignificant in most contexts.
+     * For two instances `a` and `b`, it is possible that `a == b && &*a != &*b`. However, for each pair of members
+     * `a->m` and `b->m`, if `a == b` then `a->m == b->m`.
+     *
+     * `Value` is always either `edgeWrapper_t<const Vertex, Edge>` or `edgeWrapper_t<const Vertex, const Edge>`.
+     */
+    template <typename Vertex, typename Edge, Constraints constraints, typename SizeType>
+    template <typename Value>
+    class DirectedAdjacencyList<Vertex, Edge, constraints, SizeType>::AllEdgeIterator final:
+        public boost::iterator_facade<
+            DirectedAdjacencyList<Vertex, Edge, constraints, SizeType>::AllEdgeIterator<Value>,
+            const Value, std::input_iterator_tag>
+    {
+        friend class boost::iterator_core_access;
+
+        template <typename>
+        friend class AllEdgeIterator;
+
+        private:
+            using mapIter_t = std::conditional_t<
+                std::is_const<typename Value::edge_t>::value || std::is_void<typename Value::edge_t>::value,
+                typename decltype(m_adjMap)::const_iterator, typename decltype(m_adjMap)::iterator>;
+            using listIter_t = std::conditional_t<
+                std::is_const<typename Value::edge_t>::value || std::is_void<typename Value::edge_t>::value,
+                typename std::list<adjInfo_t>::const_iterator, typename std::list<adjInfo_t>::iterator>;
+
+            std::pair<mapIter_t, mapIter_t> m_mapRange;
+            std::pair<listIter_t, listIter_t> m_listRange;
+            boost::optional<Value> m_current;
+
+            bool findNext()
+            {
+                if (++m_listRange.first == m_listRange.second)
+                {
+                    while (++m_mapRange.first != m_mapRange.second)
+                    {
+                        auto& outNeighbors = m_mapRange.first->second.outNeighbors;
+                        if (outNeighbors.size())
+                        {
+                            m_listRange.first = outNeighbors.begin(), m_listRange.second = outNeighbors.end();
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+                else
+                    return true;
+            }
+
+            const Value& dereference() const {return *m_current;}
+
+            template <typename OtherValue>
+            bool equal(const AllEdgeIterator<OtherValue>& other) const {return m_current == other.m_current;}
+
+            void increment()
+            {
+                m_current = findNext()
+                    ? edgeWrapper<typename Value::edge_t>(m_mapRange.first->first, *m_listRange.first)
+                    : boost::optional<Value>();
+            }
+
+        public:
+            AllEdgeIterator() = default;
+            AllEdgeIterator(const AllEdgeIterator&) = default;
+            AllEdgeIterator(AllEdgeIterator&&) = default;
+
+            explicit AllEdgeIterator(const std::pair<mapIter_t, mapIter_t>& mapRange): m_mapRange(mapRange)
+            {
+                if (m_mapRange.first != m_mapRange.second)
+                {
+                    auto& outNeighbors = m_mapRange.first->second.outNeighbors;
+                    m_listRange.first = outNeighbors.begin(), m_listRange.second = outNeighbors.end();
+                    if (findNext())
+                        m_current = edgeWrapper<typename Value::edge_t>(m_mapRange.first->first, *m_listRange.first);
+                }
+            }
+
+            listIter_t deepBase() {return m_listRange.first;}
+
+            AllEdgeIterator& operator=(const AllEdgeIterator&) = default;
+            AllEdgeIterator& operator=(AllEdgeIterator&&) = default;
+
+            // The following constructors and assignment operators allow conversion from non-const iterators to
+            // const iterators.
+
+            template <typename T = allEdgeIter_t>
+            AllEdgeIterator& operator=(
+                const std::enable_if_t<!std::is_same<AllEdgeIterator, T>::value, T>& other)
+            {
+
+                m_mapRange = other.m_mapRange;
+                m_listRange = other.m_listRange;
+                m_current = other.m_current;
+                return *this;
+            }
+
+            template <typename T = allEdgeIter_t>
+            AllEdgeIterator& operator=(std::enable_if_t<!std::is_same<AllEdgeIterator, T>::value, T>&& other)
+            {
+                m_mapRange = std::move(other.m_mapRange);
+                m_listRange = std::move(other.m_listRange);
+                m_current = std::move(other.m_current);
+                return *this;
+            }
+
+            template <typename T = allEdgeIter_t>
+            AllEdgeIterator(const std::enable_if_t<!std::is_same<AllEdgeIterator, T>::value, T>& other) {*this = other;}
+
+            template <typename T = allEdgeIter_t>
+            AllEdgeIterator(std::enable_if_t<!std::is_same<AllEdgeIterator, T>::value, T>&& other) {*this = other;}
     };
 }
 
