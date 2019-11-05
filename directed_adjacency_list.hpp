@@ -13,6 +13,7 @@
 #include <boost/iterator/transform_iterator.hpp>
 #include <boost/iterator/iterator_adaptor.hpp>
 #include <boost/iterator/iterator_facade.hpp>
+#include <boost/iterator/filter_iterator.hpp>
 #include <boost/utility/result_of.hpp>
 
 #include "constraints.hpp"
@@ -48,7 +49,7 @@ namespace graph
             };
 
             template <typename Iterator>
-            using baseGetter_t = std::function<typename std::list<adjInfo_t>::iterator(Iterator&)>;
+            using baseGetter_t = std::function<typename std::list<adjInfo_t>::const_iterator(Iterator&)>;
 
             // facilitates the use of iterators to remove edges efficiently, via `std::list.erase(const_iterator)`
             template <typename Iterator>
@@ -62,7 +63,7 @@ namespace graph
                     EdgeIteratorWrapper(const Iterator& iter, baseGetter_t<Iterator> baseGetter):
                         EdgeIteratorWrapper::iterator_adaptor_(iter), m_baseGetter(baseGetter) {}
 
-                    typename std::list<adjInfo_t>::iterator deepBase()
+                    typename std::list<adjInfo_t>::const_iterator deepBase()
                     {
                         return m_baseGetter(EdgeIteratorWrapper::iterator_adaptor_::base_reference());
                     }
@@ -186,6 +187,31 @@ namespace graph
                 return k;
             }
 
+            auto implInNeighbors(const Vertex& head)
+            {
+                std::function<bool(const edgeWrapper_t<const Vertex, Edge>&)> pred(
+                    [&](const edgeWrapper_t<const Vertex, Edge>& wrapper){return *wrapper.head == head;});
+                auto mapRange(std::make_pair(m_adjMap.begin(), m_adjMap.end()));
+                auto begin(boost::make_filter_iterator(pred,
+                    AllEdgeIterator<edgeWrapper_t<const Vertex, Edge>>(mapRange)));
+                baseGetter_t<decltype(begin)> baseGetter([](decltype(begin)& iter){return iter.base().deepBase();});
+                return std::make_pair(
+                    makeEdgeIteratorWrapper(begin, baseGetter),
+                    makeEdgeIteratorWrapper(boost::make_filter_iterator(pred,
+                        AllEdgeIterator<edgeWrapper_t<const Vertex, Edge>>()), baseGetter));
+            }
+
+            auto implConstInNeighbors(const Vertex& head) const
+            {
+                std::function<bool(const edgeWrapper_t<const Vertex, const Edge>&)> pred(
+                    [&](const edgeWrapper_t<const Vertex, const Edge>& wrapper){return *wrapper.head == head;});
+                auto mapRange(std::make_pair(m_adjMap.begin(), m_adjMap.end()));
+                return std::make_pair(
+                    boost::make_filter_iterator(pred,
+                        AllEdgeIterator<edgeWrapper_t<const Vertex, const Edge>>(mapRange)),
+                    boost::make_filter_iterator(pred, AllEdgeIterator<edgeWrapper_t<const Vertex, const Edge>>()));
+            }
+
         public:
             auto vertices() const
             {
@@ -200,7 +226,6 @@ namespace graph
 
             using allEdgeIter_t = AllEdgeIterator<edgeWrapper_t<const Vertex, Edge>>;
 
-            template <typename E = Edge, std::enable_if_t<!std::is_void<E>::value, bool> = true>
             auto edges()
             {
                 return std::make_pair(allEdgeIter_t(std::make_pair(m_adjMap.begin(), m_adjMap.end())), allEdgeIter_t());
@@ -216,10 +241,31 @@ namespace graph
 
             auto constEdges() const {return edges();}
 
+            using inNeighborIter_t = decltype(typename boost::result_of<
+                decltype(&DirectedAdjacencyList::implInNeighbors)(const Vertex&)>::type().first);
+
+            auto inNeighbors(const Vertex& head)
+            {
+                return m_adjMap.count(head)
+                    ? implInNeighbors(head)
+                    : std::pair<inNeighborIter_t, inNeighborIter_t>();
+            }
+
+            using constInNeighborIter_t = decltype(typename boost::result_of<
+                decltype(&DirectedAdjacencyList::implConstInNeighbors)(const Vertex&)>::type().first);
+
+            auto inNeighbors(const Vertex& head) const
+            {
+                return m_adjMap.count(head)
+                    ? implConstInNeighbors(head)
+                    : std::pair<constInNeighborIter_t, constInNeighborIter_t>();
+            }
+
+            auto constInNeighbors(const Vertex& head) const {return inNeighbors(head);}
+
             using outNeighborIter_t = decltype(typename boost::result_of<
                 decltype(&DirectedAdjacencyList::implOutNeighbors)(std::pair<const Vertex, TailInfo>&)>::type().first);
 
-            template <typename E = Edge, std::enable_if_t<!std::is_void<E>::value, bool> = true>
             auto outNeighbors(const Vertex& tail)
             {
                 auto tailIter(m_adjMap.find(tail));
@@ -401,7 +447,7 @@ namespace graph
 
             bool findNext()
             {
-                if (++m_listRange.first == m_listRange.second)
+                if (m_listRange.first == m_listRange.second)
                 {
                     while (++m_mapRange.first != m_mapRange.second)
                     {
@@ -425,6 +471,7 @@ namespace graph
 
             void increment()
             {
+                ++m_listRange.first;
                 m_current = findNext()
                     ? edgeWrapper<typename Value::edge_t>(m_mapRange.first->first, *m_listRange.first)
                     : boost::optional<Value>();
@@ -446,7 +493,8 @@ namespace graph
                 }
             }
 
-            listIter_t deepBase() {return m_listRange.first;}
+            // is const because boost's `base()` is often const
+            listIter_t deepBase() const {return m_listRange.first;}
 
             AllEdgeIterator& operator=(const AllEdgeIterator&) = default;
             AllEdgeIterator& operator=(AllEdgeIterator&&) = default;
