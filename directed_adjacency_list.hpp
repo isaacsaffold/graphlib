@@ -45,7 +45,7 @@ namespace graph
             struct TailInfo
             {
                 std::list<adjInfo_t> outNeighbors;
-                SizeType indegree = 0, outdegree = 0;
+                SizeType indegree = 0;
             };
 
             template <typename Iterator>
@@ -131,6 +131,40 @@ namespace graph
             explicit DirectedAdjacencyList(SizeType initialCapacity): m_adjMap(initialCapacity) {}
 
         private:
+            auto implInNeighbors(const Vertex& head)
+            {
+                std::function<bool(const edgeWrapper_t<const Vertex, Edge>&)> pred(
+                    [&](const edgeWrapper_t<const Vertex, Edge>& wrapper){return *wrapper.head == head;});
+                auto mapRange(std::make_pair(m_adjMap.begin(), m_adjMap.end()));
+                auto begin(boost::make_filter_iterator(pred,
+                    AllEdgeIterator<edgeWrapper_t<const Vertex, Edge>>(mapRange)));
+                baseGetter_t<decltype(begin)> baseGetter([](decltype(begin)& iter){return iter.base().deepBase();});
+                return std::make_pair(
+                    makeEdgeIteratorWrapper(begin, baseGetter),
+                    makeEdgeIteratorWrapper(boost::make_filter_iterator(pred,
+                        AllEdgeIterator<edgeWrapper_t<const Vertex, Edge>>()), baseGetter));
+            }
+
+            auto implConstInNeighbors(const Vertex& head) const
+            {
+                std::function<bool(const edgeWrapper_t<const Vertex, const Edge>&)> pred(
+                    [&](const edgeWrapper_t<const Vertex, const Edge>& wrapper){return *wrapper.head == head;});
+                auto mapRange(std::make_pair(m_adjMap.begin(), m_adjMap.end()));
+                return std::make_pair(
+                    boost::make_filter_iterator(pred,
+                        AllEdgeIterator<edgeWrapper_t<const Vertex, const Edge>>(mapRange)),
+                    boost::make_filter_iterator(pred, AllEdgeIterator<edgeWrapper_t<const Vertex, const Edge>>()));
+            }
+
+            template <typename V>
+            bool implAddVertex(V&& vertex)
+            {
+                if (m_adjMap.count(vertex))
+                    return false;
+                else
+                    return m_adjMap.emplace(vertex, TailInfo{}).second;
+            }
+
             template <typename V>
             adjInfo_t& addEndvertices(V&& tail, V&& head)
             {
@@ -141,7 +175,7 @@ namespace graph
                 if (headIter == m_adjMap.end())
                     headIter = m_adjMap.emplace(head, TailInfo{}).first;
                 TailInfo& tailInfo = tailIter->second;
-                ++m_size, ++tailInfo.outdegree, ++headIter->second.indegree;
+                ++m_size, ++headIter->second.indegree;
                 tailInfo.outNeighbors.push_back({head});
                 return tailInfo.outNeighbors.back();
             }
@@ -175,7 +209,6 @@ namespace graph
                 {
                     if (pred(tail, head, *iter))
                     {
-                        --tailIter->second.outdegree;
                         --m_adjMap.at(iter->vertex).indegree;
                         iter = outNeighbors.erase(iter);
                         ++k;
@@ -185,31 +218,6 @@ namespace graph
                 }
                 m_size -= k;
                 return k;
-            }
-
-            auto implInNeighbors(const Vertex& head)
-            {
-                std::function<bool(const edgeWrapper_t<const Vertex, Edge>&)> pred(
-                    [&](const edgeWrapper_t<const Vertex, Edge>& wrapper){return *wrapper.head == head;});
-                auto mapRange(std::make_pair(m_adjMap.begin(), m_adjMap.end()));
-                auto begin(boost::make_filter_iterator(pred,
-                    AllEdgeIterator<edgeWrapper_t<const Vertex, Edge>>(mapRange)));
-                baseGetter_t<decltype(begin)> baseGetter([](decltype(begin)& iter){return iter.base().deepBase();});
-                return std::make_pair(
-                    makeEdgeIteratorWrapper(begin, baseGetter),
-                    makeEdgeIteratorWrapper(boost::make_filter_iterator(pred,
-                        AllEdgeIterator<edgeWrapper_t<const Vertex, Edge>>()), baseGetter));
-            }
-
-            auto implConstInNeighbors(const Vertex& head) const
-            {
-                std::function<bool(const edgeWrapper_t<const Vertex, const Edge>&)> pred(
-                    [&](const edgeWrapper_t<const Vertex, const Edge>& wrapper){return *wrapper.head == head;});
-                auto mapRange(std::make_pair(m_adjMap.begin(), m_adjMap.end()));
-                return std::make_pair(
-                    boost::make_filter_iterator(pred,
-                        AllEdgeIterator<edgeWrapper_t<const Vertex, const Edge>>(mapRange)),
-                    boost::make_filter_iterator(pred, AllEdgeIterator<edgeWrapper_t<const Vertex, const Edge>>()));
             }
 
         public:
@@ -293,8 +301,8 @@ namespace graph
 
             SizeType indegree(const Vertex& vertex) const {return m_adjMap.at(vertex).indegree;}
             SizeType indegree(const vertexIter_t& iter) const {return iter.base()->second.indegree;}
-            SizeType outdegree(const Vertex& vertex) const {return m_adjMap.at(vertex).outdegree;}
-            SizeType outdegree(const vertexIter_t& iter) const {return iter.base()->second.outdegree;}
+            SizeType outdegree(const Vertex& vertex) const {return m_adjMap.at(vertex).outNeighbors.size();}
+            SizeType outdegree(const vertexIter_t& iter) const {return iter.base()->second.outNeighbors.size();}
 
             bool contains(const Vertex& vertex) const {return m_adjMap.count(vertex);}
 
@@ -328,12 +336,17 @@ namespace graph
 
             template <typename V, std::enable_if_t<
                 (constraints & Constraints::CONNECTED) == 0 && std::is_same<V, V>::value, bool> = true>
+            bool addVertex(V&& vertex) {return implAddVertex(vertex);}
+
+            template <typename V, std::enable_if_t<
+                (constraints & Constraints::CONNECTED) != 0 && std::is_same<V, V>::value, bool> = true>
             bool addVertex(V&& vertex)
             {
-                if (m_adjMap.count(vertex))
-                    return false;
+                if (!order())
+                    // The null graph on one vertex is connected.
+                    return implAddVertex(vertex);
                 else
-                    return m_adjMap.emplace(vertex, TailInfo{}).second;
+                    throw ConstraintViolationException(Constraints::CONNECTED);
             }
 
             template <typename V>
@@ -382,7 +395,6 @@ namespace graph
                 auto baseIter(iter.deepBase());
                 auto wrapper(*iter);
                 TailInfo& tailInfo = m_adjMap.at(*wrapper.tail);
-                --tailInfo.outdegree;
                 --m_adjMap.at(*wrapper.head).indegree;
                 --m_size;
                 ++iter;
@@ -411,6 +423,12 @@ namespace graph
                     removeAllEdges(elem.first, vertex);
                 m_adjMap.erase(iter);
                 return true;
+            }
+
+            void clear()
+            {
+                m_adjMap.clear();
+                m_size = 0;
             }
     };
 
