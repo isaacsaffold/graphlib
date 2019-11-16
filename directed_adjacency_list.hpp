@@ -1,7 +1,6 @@
 #ifndef GRAPHLIB_DIRECTED_ADJACENCY_LIST_HPP_1092019
 #define GRAPHLIB_DIRECTED_ADJACENCY_LIST_HPP_1092019
 
-#include <cstddef>
 #include <unordered_map>
 #include <list>
 #include <type_traits>
@@ -22,7 +21,7 @@
 namespace graph
 {
     template <typename Vertex, typename Edge = void, Constraints constraints = Constraints::SIMPLY_CONNECTED,
-        typename SizeType = std::size_t>
+        typename SizeType = unsigned int>
     class DirectedAdjacencyList final
     {
         private:
