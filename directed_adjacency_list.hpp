@@ -20,7 +20,7 @@
 
 namespace graph
 {
-    template <typename Vertex, typename Edge = void, Constraints constraints = Constraints::SIMPLY_CONNECTED,
+    template <typename Vertex, typename Edge = void, Constraints constraints = Constraints::SIMPLE,
         typename SizeType = unsigned int>
     class DirectedAdjacencyList final
     {
