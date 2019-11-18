@@ -164,35 +164,35 @@ namespace graph
                     return m_adjMap.emplace(std::forward<V>(vertex), TailInfo{}).second;
             }
 
-            template <typename V>
-            adjInfo_t& addEndvertices(V&& tail, V&& head)
+            template <typename V1, typename V2>
+            adjInfo_t& addEndvertices(V1&& tail, V2&& head)
             {
                 auto tailIter(m_adjMap.find(tail));
                 if (tailIter == m_adjMap.end())
-                    tailIter = m_adjMap.emplace(std::forward<V>(tail), TailInfo{}).first;
+                    tailIter = m_adjMap.emplace(std::forward<V1>(tail), TailInfo{}).first;
                 auto headIter(m_adjMap.find(head));
                 if (headIter == m_adjMap.end())
-                    headIter = m_adjMap.emplace(std::forward<V>(head), TailInfo{}).first;
+                    headIter = m_adjMap.emplace(std::forward<V2>(head), TailInfo{}).first;
                 TailInfo& tailInfo = tailIter->second;
                 ++m_size, ++headIter->second.indegree;
                 tailInfo.outNeighbors.push_back({head});
                 return tailInfo.outNeighbors.back();
             }
 
-            template <typename V, std::enable_if_t<
-                (constraints & Constraints::NO_LOOPS) == 0 && std::is_same<V, V>::value, bool> = true>
-            adjInfo_t& addEndverticesIfValid(V&& tail, V&& head)
+            template <typename V1, typename V2, std::enable_if_t<
+                (constraints & Constraints::NO_LOOPS) == 0 && std::is_same<V1, V1>::value, bool> = true>
+            adjInfo_t& addEndverticesIfValid(V1&& tail, V2&& head)
             {
-                return addEndvertices(std::forward<V>(tail), std::forward<V>(head));
+                return addEndvertices(std::forward<V1>(tail), std::forward<V2>(head));
             }
 
-            template <typename V, std::enable_if_t<
-                (constraints & Constraints::NO_LOOPS) != 0 && std::is_same<V, V>::value, bool> = true>
-            adjInfo_t& addEndverticesIfValid(V&& tail, V&& head)
+            template <typename V1, typename V2, std::enable_if_t<
+                (constraints & Constraints::NO_LOOPS) != 0 && std::is_same<V1, V1>::value, bool> = true>
+            adjInfo_t& addEndverticesIfValid(V1&& tail, V2&& head)
             {
                 if (tail == head)
                     throw ConstraintViolationException(Constraints::NO_LOOPS);
-                return addEndvertices(std::forward<V>(tail), std::forward<V>(head));
+                return addEndvertices(std::forward<V1>(tail), std::forward<V2>(head));
             }
 
             template <typename Predicate>
@@ -341,20 +341,20 @@ namespace graph
                 (constraints & Constraints::CONNECTED) != 0 && std::is_same<V, V>::value, bool> = true>
             bool addVertex(V&& vertex)
             {
-                if (!order())
-                    // The null graph on one vertex is connected.
+                // The null graph on one vertex is connected.
+                if (!order() || contains(vertex))
                     return implAddVertex(std::forward<V>(vertex));
                 else
                     throw ConstraintViolationException(Constraints::CONNECTED);
             }
 
-            template <typename V>
-            void addEdge(V&& tail, V&& head) {addEndverticesIfValid(std::forward<V>(tail), std::forward<V>(head));}
+            template <typename V1, typename V2>
+            void addEdge(V1&& tail, V2&& head) {addEndverticesIfValid(std::forward<V1>(tail), std::forward<V2>(head));}
 
-            template <typename V, typename E, std::enable_if_t<!std::is_void<E>::value, bool> = true>
-            void addEdge(V&& tail, V&& head, E&& edge)
+            template <typename V1, typename V2, typename E, std::enable_if_t<!std::is_void<E>::value, bool> = true>
+            void addEdge(V1&& tail, V2&& head, E&& edge)
             {
-                addEndverticesIfValid(std::forward<V>(tail), std::forward<V>(head)).edge = edge;
+                addEndverticesIfValid(std::forward<V1>(tail), std::forward<V2>(head)).edge = edge;
             }
 
             // Parameter `n` in `removeEdges` does not have a default because that would cause an ambiguity between
